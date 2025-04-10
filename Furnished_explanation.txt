@@ -1,0 +1,76 @@
+Okay, here's an explanation of the code, broken down file by file, function by function, aimed at making it understandable for a general audience.
+
+**Overall Project Goal:**
+
+This collection of scripts works together as an automated tool to find connections between columns in two different data tables (like spreadsheets or CSV files). It tries to figure out which column in the second table likely came from, or corresponds to, which column in the first table. This is called finding **data lineage**.
+
+---
+
+**File Breakdown and Function Explanations:**
+
+**1. `embedding_setup.py`**
+
+* **File Purpose:** Sets up a special AI model that helps the program understand the meaning of text.
+* **Code Actions:**
+    * Loads a pre-trained `SentenceTransformer` model (`all-mpnet-base-v1`). This model is good at converting sentences or text snippets into lists of numbers (called "embeddings") where similar meanings result in similar lists of numbers.
+    * Stores this loaded model in the `embedder` variable so other scripts can use it.
+
+**2. `data_helpers.py`**
+
+* **File Purpose:** Contains tools to clean up the input data tables before the main analysis begins.
+* **Functions:**
+    * `clean_dataframe_columns(df)`: Takes a data table (`df`) as input. It looks through the columns and removes any that are mostly empty or look like automatically generated index columns ("Unnamed:"). It also sorts the remaining columns alphabetically to keep things consistent.
+
+**3. `attribute_profile.py`**
+
+* **File Purpose:** Examines each column in a data table *individually* to create a detailed "profile" summarizing its characteristics.
+* **Functions:**
+    * `analyze_table(file_path)`: Simple function to load data from a CSV file path into a table format (pandas DataFrame).
+    * `is_mostly_numeric(...)`: Checks if the values in a column are mostly numbers (e.g., 93% or more).
+    * `contains_numeric_patterns(...)`: Checks if the text in a column seems to contain numbers, even if mixed with other characters (e.g., "$1,234.56").
+    * `get_numeric_values(...)`: Tries to pull out the actual numbers from a column's values, ignoring extra characters like commas or currency symbols.
+    * `calculate_stats(...)`: Calculates basic statistics for a list of numbers (like average, minimum, maximum, how spread out the numbers are, how many unique values there are).
+    * `detect_web_urls(...)`: Checks if the values in a column look like website addresses (URLs).
+    * `detect_date_format(...)`: Checks if the values in a column look like dates.
+    * `analyze_text_properties(...)`: Analyzes text columns to see how often things like spaces, punctuation marks, special symbols (@, #, $), and digits appear.
+    * `compute_text_embeddings(...)`: Uses the language model (from `embedding_setup.py`) to create a numerical summary (embedding) that represents the *meaning* of the text found in a column.
+    * `generate_column_profile(...)`: This is the main worker function in this file. It calls many of the other functions above to gather information about a single column (its type, stats, text patterns, semantic meaning) and combines it all into one numerical list – the column's profile.
+    * `profile_dataframe_columns(...)`: Takes an entire data table and runs `generate_column_profile` on each of its columns to get a profile for every column.
+
+**4. `cross_attribute_analysis.py`**
+
+* **File Purpose:** Compares columns *between the two different tables* (`Table1` and `Table2`) to measure how similar they are.
+* **Functions:**
+    * `normalize_text(...)`: Cleans up text, usually column names, by making it lowercase and removing numbers or symbols so comparisons are fairer.
+    * `jaccard_similarity(...)`: A standard way to measure the similarity between two sets of items (like sets of words).
+    * `compute_name_similarity_features(...)`: Calculates how similar two column *names* are. It uses several methods: checking word overlap, character overlap, linguistic similarity (BLEU score), and comparing the semantic meaning of the names using the language model.
+    * `compute_content_similarity(...)`: Calculates how similar the *actual data* inside two columns is by comparing their semantic embeddings (created in `attribute_profile.py`).
+    * `analyze_table_columns(...)`: This function coordinates the comparison. It takes the two tables, gets their column profiles, and then for *every possible pair* of columns (one from `Table1`, one from `Table2`), it calculates a list of features: how different their profiles are, how similar their names are, and how similar their content is. This list of features describes the potential relationship between that pair of columns.
+
+**5. `attribute_matcher.py`**
+
+* **File Purpose:** Takes the comparison results (features) and uses machine learning models to predict which columns are actually linked (lineage). It also manages the overall process and output.
+* **Functions:**
+    * `softmax(...)`: A mathematical function used to convert raw scores into probabilities that add up to 1. Used here in combining predictions.
+    * `build_correspondence_matrix(...)`: Takes the raw prediction scores for all column pairs. It intelligently combines scores (especially if multiple prediction models are used), applies rules based on the desired matching strategy (e.g., 'one-to-one' means a column can only match one other column), filters based on a confidence threshold, and produces the final list of matched column pairs with adjusted confidence scores.
+    * `find_data_lineage(...)`: This is the main function that runs the entire lineage discovery process. It:
+        * Loads the two tables.
+        * Cleans them using `data_helpers.py`.
+        * Generates the comparison features for all column pairs using `cross_attribute_analysis.py`.
+        * Loads pre-trained prediction models (XGBoost).
+        * Uses the models to predict the likelihood of a match for each pair based on their features.
+        * Calls `build_correspondence_matrix` to finalize the matches and confidence scores.
+    * `if __name__ == '__main__':` block: This code runs only when you execute `attribute_matcher.py` directly. It handles reading settings from the command line (like which directory the tables are in), starts the `find_data_lineage` process, measures how long it takes, and prints the final identified lineage pairs to the screen while also saving detailed results to CSV files.
+
+---
+
+**Overall Code Flow (How it Works Together):**
+
+1.  **Start:** The process kicks off when you run the `attribute_matcher.py` script.
+2.  **Load & Setup:** It loads the two input data tables (`Table1.csv`, `Table2.csv`) and the text-understanding AI model (`embedding_setup.py`).
+3.  **Clean Data:** The tables are cleaned up – useless columns are removed, and the remaining columns are sorted (`data_helpers.py`).
+4.  **Profile Columns:** The script analyzes every column in *both* tables individually, creating a numerical "profile" for each one that describes its data type, statistics, text patterns, and semantic meaning (`attribute_profile.py`).
+5.  **Compare Pairs:** It then systematically compares *every possible pair* of columns where one column is from Table1 and the other is from Table2. For each pair, it calculates features measuring how similar their profiles, names, and data content are (`cross_attribute_analysis.py`).
+6.  **Predict Matches:** These comparison features are fed into pre-trained machine learning models (XGBoost) which predict the probability that the two columns in the pair are actually related (`attribute_matcher.py`).
+7.  **Finalize Results:** The predictions are combined and filtered based on confidence levels and the chosen matching strategy (e.g., `many-to-many`, `one-to-one`). This produces the final list of lineage links (`attribute_matcher.py`).
+8.  **Output:** The identified column pairs (e.g., "Table1 Column 'UserID'" -> "Table2 Column 'Customer ID'") and their confidence scores are printed, and detailed results are saved to files (`confidence_scores.csv`, `lineage_results.csv`).
