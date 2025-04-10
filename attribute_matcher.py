@@ -1,6 +1,6 @@
 from . import embedding_setup
 from .cross_attribute_analysis import analyze_table_columns
-from .data_helpers import json_to_dataframe, clean_dataframe_columns
+from .data_helpers import clean_dataframe_columns
 import numpy as np
 import pandas as pd
 import xgboost as xgb
