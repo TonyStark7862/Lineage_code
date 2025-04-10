@@ -74,3 +74,115 @@ This collection of scripts works together as an automated tool to find connectio
 6.  **Predict Matches:** These comparison features are fed into pre-trained machine learning models (XGBoost) which predict the probability that the two columns in the pair are actually related (`attribute_matcher.py`).
 7.  **Finalize Results:** The predictions are combined and filtered based on confidence levels and the chosen matching strategy (e.g., `many-to-many`, `one-to-one`). This produces the final list of lineage links (`attribute_matcher.py`).
 8.  **Output:** The identified column pairs (e.g., "Table1 Column 'UserID'" -> "Table2 Column 'Customer ID'") and their confidence scores are printed, and detailed results are saved to files (`confidence_scores.csv`, `lineage_results.csv`).
+
+
+
+Okay, here is the full explanation again, incorporating the Feature Matrix with example numerical values as requested.
+
+**1. The Goal:**
+
+Imagine you have two spreadsheets (Tables) and want to automatically find columns that represent the *same kind of information*, even if the names or formats are slightly different.
+
+**2. Example Tables:**
+
+* **Table1 (Source)**
+    ```
+    +----+-------+------------+--------+
+    | ID | Name  | Join_Date  | Value  |
+    +----+-------+------------+--------+
+    | 1  | Alice | 2024-01-10 | 100.50 |
+    | 2  | Bob   | 2024-02-15 | 250.00 |
+    | 3  | Carol | 2024-03-20 |  75.25 |
+    +----+-------+------------+--------+
+    ```
+
+* **Table2 (Target)**
+    ```
+    +---------+---------------+-------------+----------+--------+
+    | Cust_ID | Customer Name | Signup Date | Notes    | Amount |
+    +---------+---------------+-------------+----------+--------+
+    | 1       | Alice         | 10 Jan 2024 | ...      | $100.5 |
+    | 2       | Bob           | 15 Feb 2024 | ...      | $250.0 |
+    | 3       | Carol         | 20 Mar 2024 | ...      |  $75.3 |
+    +---------+---------------+-------------+----------+--------+
+    ```
+    *(Goal: Match `ID` <-> `Cust_ID`, `Name` <-> `Customer Name`, `Join_Date` <-> `Signup Date`, `Value` <-> `Amount`)*
+
+**3. How the Code Works (Simplified Steps):**
+
+* **Step A: Analyze Each Column (Profiling)**
+    The code looks at *each column individually* in both tables and creates a "profile" – a list of numbers describing it.
+
+    ```
+    Table1 Columns          Profile Created
+    ----------------        -----------------------------
+    ID         -----------> [Number, Stats, Length, Meaning...]
+    Name       -----------> [Text, Stats, Length, Text Info, Meaning...]
+    Join_Date  -----------> [Date, Stats, Length, Meaning...]
+    Value      -----------> [Number, Stats, Length, Meaning...]
+
+    Table2 Columns          Profile Created
+    ----------------        -----------------------------
+    Cust_ID    -----------> [Number, Stats, Length, Meaning...]
+    Customer Name --------> [Text, Stats, Length, Text Info, Meaning...]
+    Signup Date ---------> [Date, Stats, Length, Meaning...]
+    Notes      -----------> [Text, Stats, Length, Text Info, Meaning...]
+    Amount     -----------> [Number, Stats, Length, Meaning...]
+    ```
+    *(This captures data type, stats, text patterns, and semantic meaning)*
+
+* **Step B: Compare ALL Pairs & Create Feature Matrix**
+    The code compares *every column from Table1* with *every column from Table2*. For each pair, it calculates similarity scores and difference metrics as **precise numbers** (features).
+
+    *Possible Pairs:* (ID, Cust\_ID), (ID, Customer Name), ..., (Name, Cust\_ID), (Name, Customer Name), ..., (Value, Amount) - *lots of pairs!*
+
+    This creates a **Feature Matrix** with actual numerical values:
+
+    ```
+    +---------------------------+----------------+-----------------+------------------+-----+---------------+
+    | Column Pair               | Profile Diff 1 | Name Sim Score1 | Content SimScore | ... | Feature 30    |
+    +---------------------------+----------------+-----------------+------------------+-----+---------------+
+    | (ID, Cust_ID)             | 0.15           | 0.62            | 0.91             | ... | ...           |
+    | (ID, Customer Name)       | 0.88           | 0.05            | 0.12             | ... | ...           |
+    | (ID, Signup Date)         | 0.95           | 0.11            | 0.08             | ... | ...           |
+    | ...                       | ...            | ...             | ...              | ... | ...           |
+    | (Name, Customer Name)     | 0.21           | 0.93            | 0.89             | ... | ...           |
+    | ...                       | ...            | ...             | ...              | ... | ...           |
+    | (Value, Amount)           | 0.18           | 0.55            | 0.85             | ... | ...           |
+    +---------------------------+----------------+-----------------+------------------+-----+---------------+
+    ```
+    *(These numbers represent calculated differences, similarity scores, etc., for each pair)*
+
+* **Step C: Predict Matches (Machine Learning)**
+    This Feature Matrix (filled with numbers) is fed into a pre-trained "Prediction Engine" (an XGBoost model). The engine looks at the 30 numerical features for each pair and predicts the probability of a match.
+
+    ```
+    Feature Matrix              Prediction Engine            Probabilities
+    +--------------------+...      +-------------+      +---------------------------+-------------+
+    | Pair               |... ===> |   XGBoost   | ===> | Pair                      | Probability |
+    +--------------------+...      |    Model    |      +---------------------------+-------------+
+    | (ID, Cust_ID)      |...      +-------------+      | (ID, Cust_ID)             |    0.95     |
+    | (ID, Customer Name)|...                           | (ID, Customer Name)       |    0.02     |
+    | ...                |...                           | ...                       |     ...     |
+    | (Name, Cust_Name)  |...                           | (Name, Customer Name)     |    0.98     |
+    | ...                |...                           | ...                       |     ...     |
+    | (Value, Amount)    |...                           | (Value, Amount)           |    0.92     |
+    +--------------------+...                           +---------------------------+-------------+
+    ```
+
+* **Step D: Final Results**
+    The code takes the probabilities, applies a threshold (e.g., > 0.5?) and rules (like 'one-to-one' matching), and gives the final list of likely connections.
+
+    ```
+    Probabilities               Final Rules               Final Matches
+    +--------------------+...      +-------------+      +---------------------------+------------+
+    | Pair               |... ===> | Threshold & | ===> | Match Found               | Confidence |
+    +--------------------+...      |  Strategy   |      +---------------------------+------------+
+    | (ID, Cust_ID)      |...      +-------------+      | ID -> Cust_ID             |    0.95    |
+    | (Name, Cust_Name)  |...                           | Name -> Customer Name     |    0.98    |
+    | (Join_Date, Signup)|...                           | Join_Date -> Signup Date  |    0.96    |
+    | (Value, Amount)    |...                           | Value -> Amount           |    0.92    |
+    +--------------------+...                           +---------------------------+------------+
+    ```
+
+**In short:** Analyze columns individually -> Compare all pairs calculating **numerical features** -> Use ML to predict based on those numbers -> Filter to get final matches.
